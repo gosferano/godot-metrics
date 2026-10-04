@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Gosferano.Godot.Metrics;
 
 /// <summary>
@@ -5,6 +7,11 @@ namespace Gosferano.Godot.Metrics;
 /// </summary>
 public static class GodotMetrics
 {
+    /// <summary>
+    /// Logger category of every message the library writes
+    /// </summary>
+    public const string LogCategory = "Gosferano.Godot.Metrics";
+
     /// <summary>
     /// Starts listening to the configured meters and registers a Godot custom monitor for every instrument
     /// </summary>
@@ -34,6 +41,8 @@ public static class GodotMetrics
             );
         }
 
-        return new GodotMetricsHandle(new MetricsCollector(options, adapter, timeProvider));
+        ILogger logger = options.LoggerFactory?.CreateLogger(LogCategory) ?? new AdapterLogger(adapter);
+
+        return new GodotMetricsHandle(new MetricsCollector(options, adapter, logger, timeProvider));
     }
 }

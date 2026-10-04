@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 
 namespace Gosferano.Godot.Metrics.Tests.Mocks;
 
@@ -10,7 +11,7 @@ internal sealed class FakeMonitorAdapter : IMonitorAdapter
     private readonly ConcurrentDictionary<string, MonitorDefinition> _monitors = new();
     private readonly ConcurrentQueue<string> _removed = new();
     private readonly ConcurrentQueue<string> _duplicates = new();
-    private readonly ConcurrentQueue<string> _warnings = new();
+    private readonly ConcurrentQueue<(LogLevel Level, string Message)> _logs = new();
     private readonly ConcurrentQueue<Action> _posted = new();
 
     public IReadOnlyDictionary<string, MonitorDefinition> Monitors => _monitors;
@@ -19,7 +20,7 @@ internal sealed class FakeMonitorAdapter : IMonitorAdapter
 
     public IReadOnlyCollection<string> DuplicateAdds => _duplicates;
 
-    public IReadOnlyCollection<string> Warnings => _warnings;
+    public IReadOnlyCollection<(LogLevel Level, string Message)> Logs => _logs;
 
     public int PostedCount => _posted.Count;
 
@@ -42,9 +43,9 @@ internal sealed class FakeMonitorAdapter : IMonitorAdapter
         _posted.Enqueue(action);
     }
 
-    public void LogWarning(string message)
+    public void Log(LogLevel level, string message)
     {
-        _warnings.Enqueue(message);
+        _logs.Enqueue((level, message));
     }
 
     /// <summary>

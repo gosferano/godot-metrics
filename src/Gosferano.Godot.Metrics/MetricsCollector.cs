@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using Microsoft.Extensions.Logging;
 
 namespace Gosferano.Godot.Metrics;
 
@@ -19,6 +20,7 @@ internal sealed class MetricsCollector : IDisposable
 
     private readonly GodotMetricsOptions _options;
     private readonly IMonitorAdapter _adapter;
+    private readonly ILogger _logger;
     private readonly TimeProvider _timeProvider;
     private readonly MeterFilter _filter;
     private readonly MeterListener _listener;
@@ -30,10 +32,16 @@ internal sealed class MetricsCollector : IDisposable
     private long _lastCollectTimestamp;
     private int _disposed;
 
-    public MetricsCollector(GodotMetricsOptions options, IMonitorAdapter adapter, TimeProvider timeProvider)
+    public MetricsCollector(
+        GodotMetricsOptions options,
+        IMonitorAdapter adapter,
+        ILogger logger,
+        TimeProvider timeProvider
+    )
     {
         _options = options;
         _adapter = adapter;
+        _logger = logger;
         _timeProvider = timeProvider;
         _filter = new MeterFilter(options.MeterPatterns);
         _lastCollectTimestamp = timeProvider.GetTimestamp();
@@ -107,9 +115,10 @@ internal sealed class MetricsCollector : IDisposable
 
         if (kind == InstrumentKind.Unknown && _unknownTypesLogged.TryAdd(instrument.GetType(), 0))
         {
-            _adapter.LogWarning(
-                $"Unrecognized instrument type '{instrument.GetType().FullName}' "
-                    + $"(first seen on '{instrument.Meter.Name}/{instrument.Name}'); showing its last value."
+            MetricsLog.UnrecognizedInstrumentType(
+                _logger,
+                instrument.GetType().FullName ?? instrument.GetType().Name,
+                $"{instrument.Meter.Name}/{instrument.Name}"
             );
         }
 
@@ -120,6 +129,7 @@ internal sealed class MetricsCollector : IDisposable
             splitKeys,
             _options.CounterTotals,
             _adapter,
+            _logger,
             ReadValue
         );
 

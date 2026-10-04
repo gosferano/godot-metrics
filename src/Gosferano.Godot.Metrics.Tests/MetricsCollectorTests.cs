@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using Gosferano.Godot.Metrics.Tests.Helpers;
 using Gosferano.Godot.Metrics.Tests.Mocks;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Gosferano.Godot.Metrics.Tests;
@@ -72,7 +73,7 @@ public class MetricsCollectorTests
 
         // Assert
         Assert.Equal(9, snapshot[context.Id("zone.temperature")]);
-        Assert.Empty(context.Adapter.Warnings);
+        Assert.Empty(context.Logger.Entries);
     }
 
     [Fact]
@@ -91,7 +92,9 @@ public class MetricsCollectorTests
         // Assert
         Assert.Equal(2, snapshot[context.Id("custom.a")]);
         Assert.Equal(0, snapshot[context.Id("custom.b")]);
-        Assert.Single(context.Adapter.Warnings);
+        var entry = Assert.Single(context.Logger.Entries);
+        Assert.Equal(typeof(UnknownInstrument<int>).FullName, entry.Properties["InstrumentType"]);
+        Assert.Equal(context.Id("custom.a"), entry.Properties["Instrument"]);
     }
 
     [Fact]
@@ -292,6 +295,7 @@ public class MetricsCollectorTests
         using var collector = new MetricsCollector(
             new GodotMetricsOptions().IncludeMeter(meter.Name),
             adapter,
+            NullLogger.Instance,
             new FakeTimeProvider()
         );
         counter.Add(2);

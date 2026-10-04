@@ -16,7 +16,8 @@ Shows .NET `System.Diagnostics.Metrics` instruments as Godot 4 custom monitors. 
 - ✅ **Typed Monitors** - Durations show as time, bytes as memory and `%` as a percentage (Godot 4.7+)
 - ✅ **Thread-Safe** - Record from any thread; Godot calls are marshalled to the main thread
 - ✅ **Snapshot API** - Read the same numbers from an in-game overlay in exported builds
-- ✅ **Zero Dependencies** - Only requires GodotSharp
+- ✅ **Standard Logging** - Logs through `Microsoft.Extensions.Logging`, so Serilog, NLog and others plug in; falls back to the Godot output
+- ✅ **Minimal Dependencies** - Only GodotSharp and `Microsoft.Extensions.Logging.Abstractions`
 
 ## Installation
 
@@ -29,6 +30,8 @@ dotnet add package Gosferano.Godot.Metrics
 ```xml
 <PackageReference Include="Gosferano.Godot.Metrics" Version="0.1.0" />
 ```
+
+Godot loads NuGet dependencies only when the game project has `<EnableDynamicLoading>true</EnableDynamicLoading>`, which the default Godot project template includes.
 
 ## Quick Start
 
@@ -179,6 +182,25 @@ public partial class MetricsOverlay : Label
 ```
 Snapshot values are in the instrument's own unit (milliseconds stay milliseconds). Reading every frame is cheap: reads within 100 ms of the last collect cycle reuse its result.
 
+### Logging
+
+The library logs warnings when a split instrument hits the series cap, and when it meets an instrument type it doesn't recognize. By default these go to the Godot output via `GD.PushWarning`.
+
+To route them through your own logging, pass an `ILoggerFactory`. Messages are written under the `GodotMetrics.LogCategory` category (`"Gosferano.Godot.Metrics"`) as structured templates. With Serilog, add `Serilog.Extensions.Logging` to the game project:
+```csharp
+using Serilog;
+using Serilog.Extensions.Logging;
+
+var loggerFactory = new SerilogLoggerFactory(Log.Logger);
+
+_metrics = GodotMetrics.Enable(o => o
+    .IncludeMeter("MyGame.*")
+    .UseLoggerFactory(loggerFactory));
+```
+Serilog then receives properties such as `Instrument`, `MaxSeries` and `InstrumentType`, with `SourceContext` set to `Gosferano.Godot.Metrics`.
+
+> `Serilog.Extensions.Logging` 9+ brings in `System.Diagnostics.DiagnosticSource` 9+, which replaces the .NET 8 copy of the metrics APIs in your game. This package works with both, and it also makes synchronous `Gauge<T>` available.
+
 ### Threading Notes
 
 - **Recording** is safe from any thread. Aggregation uses `Interlocked` operations and small locks.
@@ -189,6 +211,14 @@ Snapshot values are in the instrument's own unit (milliseconds stay milliseconds
 ## API Reference
 
 ### GodotMetrics
+
+#### Constants
+
+**LogCategory**
+```csharp
+const string LogCategory = "Gosferano.Godot.Metrics"
+```
+Logger category of every message the library writes. Use it to filter or set levels in your logging configuration.
 
 #### Methods
 
@@ -219,6 +249,12 @@ Shows one monitor set per distinct value of `tagKeys` for every instrument named
 GodotMetricsOptions WithCounterTotals()
 ```
 Adds a `total` monitor next to each counter's `rate` monitor.
+
+**UseLoggerFactory**
+```csharp
+GodotMetricsOptions UseLoggerFactory(ILoggerFactory loggerFactory)
+```
+Writes the library's log messages through `loggerFactory` under `GodotMetrics.LogCategory`. Without it, warnings go to the Godot output.
 
 ### GodotMetricsHandle
 

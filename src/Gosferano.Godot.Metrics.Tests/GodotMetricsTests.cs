@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using Gosferano.Godot.Metrics.Tests.Helpers;
 using Gosferano.Godot.Metrics.Tests.Mocks;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Gosferano.Godot.Metrics.Tests;
@@ -49,5 +50,44 @@ public class GodotMetricsTests
             [$"{prefix}.Ecs/ecs.entities", $"{prefix}.Simulation/ticks.processed rate"],
             adapter.Monitors.Keys.Order()
         );
+    }
+
+    [Fact]
+    public void Enable_WithLoggerFactory_LogsThroughItUnderLibraryCategory()
+    {
+        // Arrange
+        using var meter = new Meter(MetricsTestContext.UniqueMeterName());
+        var adapter = new FakeMonitorAdapter();
+        var loggerFactory = new FakeLoggerFactory();
+
+        // Act
+        using var handle = GodotMetrics.Enable(
+            o => o.IncludeMeter(meter.Name).UseLoggerFactory(loggerFactory),
+            adapter,
+            new FakeTimeProvider()
+        );
+        _ = new UnknownInstrument<int>(meter, "custom");
+
+        // Assert
+        Assert.Equal([GodotMetrics.LogCategory], loggerFactory.Categories);
+        Assert.Single(loggerFactory.Logger.Entries);
+        Assert.Empty(adapter.Logs);
+    }
+
+    [Fact]
+    public void Enable_WithoutLoggerFactory_LogsThroughAdapter()
+    {
+        // Arrange
+        using var meter = new Meter(MetricsTestContext.UniqueMeterName());
+        var adapter = new FakeMonitorAdapter();
+
+        // Act
+        using var handle = GodotMetrics.Enable(o => o.IncludeMeter(meter.Name), adapter, new FakeTimeProvider());
+        _ = new UnknownInstrument<int>(meter, "custom");
+
+        // Assert
+        var (level, message) = Assert.Single(adapter.Logs);
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Contains($"{meter.Name}/custom", message);
     }
 }

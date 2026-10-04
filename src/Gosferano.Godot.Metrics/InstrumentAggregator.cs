@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.Text;
+using Microsoft.Extensions.Logging;
 
 namespace Gosferano.Godot.Metrics;
 
@@ -20,6 +21,7 @@ internal sealed class InstrumentAggregator
     private readonly string[] _splitKeys;
     private readonly bool _counterTotals;
     private readonly IMonitorAdapter _adapter;
+    private readonly ILogger _logger;
     private readonly Func<string, double> _readValue;
     private readonly MonitorFormat _unitFormat;
     private readonly double _unitScale;
@@ -35,6 +37,7 @@ internal sealed class InstrumentAggregator
     /// <param name="splitKeys">Tag keys to split by; empty merges all tags</param>
     /// <param name="counterTotals">Whether counters also report their running total</param>
     /// <param name="adapter">Receives monitor registrations</param>
+    /// <param name="logger">Receives the series cap warning</param>
     /// <param name="readValue">Reads a monitor's current value (in instrument units) by id</param>
     public InstrumentAggregator(
         Instrument instrument,
@@ -42,6 +45,7 @@ internal sealed class InstrumentAggregator
         string[] splitKeys,
         bool counterTotals,
         IMonitorAdapter adapter,
+        ILogger logger,
         Func<string, double> readValue
     )
     {
@@ -50,6 +54,7 @@ internal sealed class InstrumentAggregator
         _splitKeys = splitKeys;
         _counterTotals = counterTotals;
         _adapter = adapter;
+        _logger = logger;
         _readValue = readValue;
         (_unitFormat, _unitScale) = MonitorUnits.Resolve(instrument.Unit);
         BaseId = Sanitize(instrument.Meter.Name) + "/" + Sanitize(instrument.Name);
@@ -159,10 +164,7 @@ internal sealed class InstrumentAggregator
                 if (!_capWarned)
                 {
                     _capWarned = true;
-                    _adapter.LogWarning(
-                        $"'{BaseId}' exceeded {MaxSeries} tag combinations; "
-                            + $"further combinations are merged into {OtherSeriesKey}."
-                    );
+                    MetricsLog.SeriesCapExceeded(_logger, BaseId, MaxSeries, OtherSeriesKey);
                 }
 
                 key = OtherSeriesKey;

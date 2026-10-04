@@ -1,5 +1,6 @@
 using System.Reflection;
 using Godot;
+using Microsoft.Extensions.Logging;
 using GodotArray = Godot.Collections.Array;
 
 namespace Gosferano.Godot.Metrics;
@@ -61,9 +62,20 @@ internal sealed class GodotMonitorAdapter : IMonitorAdapter
         CallDeferred(action);
     }
 
-    public void LogWarning(string message)
+    public void Log(LogLevel level, string message)
     {
-        GD.PushWarning(LogPrefix + message);
+        if (level >= LogLevel.Error)
+        {
+            GD.PushError(LogPrefix + message);
+        }
+        else if (level == LogLevel.Warning)
+        {
+            GD.PushWarning(LogPrefix + message);
+        }
+        else
+        {
+            GD.Print(LogPrefix + message);
+        }
     }
 
     private static void CallDeferred(Action action)

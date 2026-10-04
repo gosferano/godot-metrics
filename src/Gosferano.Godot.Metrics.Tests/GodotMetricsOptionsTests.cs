@@ -1,3 +1,4 @@
+using Gosferano.Godot.Metrics.Tests.Mocks;
 using Xunit;
 
 namespace Gosferano.Godot.Metrics.Tests;
@@ -77,6 +78,30 @@ public class GodotMetricsOptionsTests
     }
 
     [Fact]
+    public void UseLoggerFactory_WithNull_Throws()
+    {
+        // Arrange
+        var options = new GodotMetricsOptions();
+
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => options.UseLoggerFactory(null!));
+    }
+
+    [Fact]
+    public void UseLoggerFactory_StoresFactory()
+    {
+        // Arrange
+        var options = new GodotMetricsOptions();
+        var factory = new FakeLoggerFactory();
+
+        // Act
+        options.UseLoggerFactory(factory);
+
+        // Assert
+        Assert.Same(factory, options.LoggerFactory);
+    }
+
+    [Fact]
     public void FluentMethods_ReturnSameInstance()
     {
         // Arrange
@@ -86,5 +111,6 @@ public class GodotMetricsOptionsTests
         Assert.Same(options, options.IncludeMeter("A"));
         Assert.Same(options, options.SplitBy("b", "c"));
         Assert.Same(options, options.WithCounterTotals());
+        Assert.Same(options, options.UseLoggerFactory(new FakeLoggerFactory()));
     }
 }

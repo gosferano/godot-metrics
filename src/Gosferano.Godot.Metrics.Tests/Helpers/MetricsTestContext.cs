@@ -17,7 +17,7 @@ internal sealed class MetricsTestContext : IDisposable
         var options = new GodotMetricsOptions().IncludeMeter(MeterName);
         configure?.Invoke(options);
 
-        Collector = new MetricsCollector(options, Adapter, Time);
+        Collector = new MetricsCollector(options, Adapter, Logger, Time);
     }
 
     public string MeterName { get; }
@@ -27,6 +27,8 @@ internal sealed class MetricsTestContext : IDisposable
     public FakeMonitorAdapter Adapter { get; } = new();
 
     public FakeTimeProvider Time { get; } = new();
+
+    public FakeLogger Logger { get; } = new();
 
     public MetricsCollector Collector { get; }
 

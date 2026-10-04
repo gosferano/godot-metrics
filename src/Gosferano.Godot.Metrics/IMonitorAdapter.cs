@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Gosferano.Godot.Metrics;
 
 /// <summary>
@@ -21,7 +23,7 @@ internal interface IMonitorAdapter
     void Post(Action action);
 
     /// <summary>
-    /// Reports a warning to the engine log
+    /// Writes to the engine log. Used when no logger factory is configured.
     /// </summary>
-    void LogWarning(string message);
+    void Log(LogLevel level, string message);
 }

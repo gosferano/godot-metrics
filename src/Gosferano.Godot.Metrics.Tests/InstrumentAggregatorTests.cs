@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using Gosferano.Godot.Metrics.Tests.Helpers;
 using Gosferano.Godot.Metrics.Tests.Mocks;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Gosferano.Godot.Metrics.Tests;
@@ -9,6 +10,7 @@ public class InstrumentAggregatorTests : IDisposable
 {
     private readonly Meter _meter = new(MetricsTestContext.UniqueMeterName());
     private readonly FakeMonitorAdapter _adapter = new();
+    private readonly FakeLogger _logger = new();
 
     public void Dispose()
     {
@@ -181,8 +183,12 @@ public class InstrumentAggregatorTests : IDisposable
         Assert.Equal(InstrumentAggregator.MaxSeries + 1, _adapter.Monitors.Count);
         Assert.Equal(extra, values[$"{aggregator.BaseId}{{other}}"]);
         Assert.Equal(2, values[$"{aggregator.BaseId}{{id=0}}"]);
-        Assert.Single(_adapter.Warnings);
-        Assert.Contains("{other}", _adapter.Warnings.Single());
+        var entry = Assert.Single(_logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal(aggregator.BaseId, entry.Properties["Instrument"]);
+        Assert.Equal(InstrumentAggregator.MaxSeries, entry.Properties["MaxSeries"]);
+        Assert.Equal("{other}", entry.Properties["OtherSeries"]);
+        Assert.Contains("{other}", entry.Message);
     }
 
     [Fact]
@@ -238,6 +244,7 @@ public class InstrumentAggregatorTests : IDisposable
             splitKeys ?? [],
             counterTotals: false,
             _adapter,
+            _logger,
             readValue ?? (_ => 0)
         );
     }

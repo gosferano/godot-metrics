@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Gosferano.Godot.Metrics;
 
 /// <summary>
@@ -13,6 +15,8 @@ public sealed class GodotMetricsOptions
     internal IReadOnlyDictionary<string, string[]> Splits => _splits;
 
     internal bool CounterTotals { get; private set; }
+
+    internal ILoggerFactory? LoggerFactory { get; private set; }
 
     /// <summary>
     /// Includes every meter whose name matches the pattern
@@ -52,6 +56,19 @@ public sealed class GodotMetricsOptions
     public GodotMetricsOptions WithCounterTotals()
     {
         CounterTotals = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Writes the library's log messages through <paramref name="loggerFactory"/>, under the
+    /// <see cref="GodotMetrics.LogCategory"/> category. Without it, warnings go to the Godot output.
+    /// </summary>
+    /// <param name="loggerFactory">Logger factory, e.g. <c>new SerilogLoggerFactory(Log.Logger)</c></param>
+    public GodotMetricsOptions UseLoggerFactory(ILoggerFactory loggerFactory)
+    {
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+
+        LoggerFactory = loggerFactory;
         return this;
     }
 }
