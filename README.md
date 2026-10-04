@@ -28,7 +28,7 @@ dotnet add package Gosferano.Godot.Metrics
 
 ### Via Package Reference
 ```xml
-<PackageReference Include="Gosferano.Godot.Metrics" Version="0.1.0" />
+<PackageReference Include="Gosferano.Godot.Metrics" Version="0.2.0" />
 ```
 
 Godot loads NuGet dependencies only when the game project has `<EnableDynamicLoading>true</EnableDynamicLoading>`, which the default Godot project template includes.
