@@ -16,6 +16,12 @@ internal sealed class InstrumentAggregator
     internal const int MaxSeries = 100;
     internal const string OtherSeriesKey = "{other}";
 
+    // Room for every distinct series plus the same values arriving as different types (e.g. int and long ids)
+    internal const int MaxCachedSplitKeys = MaxSeries * 2;
+
+    [ThreadStatic]
+    private static object?[]? _splitValuesScratch;
+
     private readonly Instrument _instrument;
     private readonly InstrumentKind _kind;
     private readonly string[] _splitKeys;
@@ -26,6 +32,7 @@ internal sealed class InstrumentAggregator
     private readonly MonitorFormat _unitFormat;
     private readonly double _unitScale;
     private readonly ConcurrentDictionary<string, SeriesEntry> _series = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<SplitKey, SeriesEntry> _splitCache = new();
     private readonly object _gate = new();
 
     private int _distinctSeries;
@@ -73,6 +80,11 @@ internal sealed class InstrumentAggregator
     public bool IsSplit => _splitKeys.Length > 0;
 
     /// <summary>
+    /// Number of tag value combinations that resolve to a series without allocating
+    /// </summary>
+    internal int CachedSplitKeyCount => _splitCache.Count;
+
+    /// <summary>
     /// Registers the monitors of a merged instrument up front, so they show before the first measurement.
     /// This also gives Godot something to poll, which in turn polls observable instruments.
     /// </summary>
@@ -86,15 +98,27 @@ internal sealed class InstrumentAggregator
 
     public void Record(double value, ReadOnlySpan<KeyValuePair<string, object?>> tags)
     {
-        string key = IsSplit ? BuildSeriesKey(tags) : "";
-
-        if (_series.TryGetValue(key, out var entry))
+        if (!IsSplit)
         {
-            entry.Series.Record(value);
+            if (!_series.TryGetValue("", out var merged))
+            {
+                merged = GetOrCreateSeries("");
+            }
+
+            merged.Series.Record(value);
             return;
         }
 
-        GetOrCreateSeries(key).Record(value);
+        // Hot path: look the series up by tag values, without building its id
+        object?[] values = CollectSplitValues(tags);
+
+        if (_splitCache.TryGetValue(new SplitKey(values, _splitKeys.Length), out var cached))
+        {
+            cached.Series.Record(value);
+            return;
+        }
+
+        RecordUncached(value, values.AsSpan(0, _splitKeys.Length).ToArray());
     }
 
     public void BeginObservation()
@@ -140,23 +164,61 @@ internal sealed class InstrumentAggregator
         lock (_gate)
         {
             _closed = true;
+            _splitCache.Clear();
             return _series.Values.SelectMany(entry => entry.Ids).ToArray();
         }
     }
 
-    private MetricSeries GetOrCreateSeries(string key)
+    private void RecordUncached(double value, object?[] values)
+    {
+        string key = BuildSeriesKey(values);
+        var entry = GetOrCreateSeries(key);
+        entry.Series.Record(value);
+
+        // Cache only series these values own. Overflow into {other} stays uncached, so unbounded tag values
+        // (the case the cap exists for) cannot grow the cache either.
+        if (entry.Key == key && _splitCache.Count < MaxCachedSplitKeys)
+        {
+            _splitCache.TryAdd(new SplitKey(values, values.Length), entry);
+        }
+    }
+
+    private object?[] CollectSplitValues(ReadOnlySpan<KeyValuePair<string, object?>> tags)
+    {
+        int length = _splitKeys.Length;
+        object?[] values = _splitValuesScratch is { } scratch && scratch.Length >= length
+            ? scratch
+            : _splitValuesScratch = new object?[Math.Max(length, 4)];
+
+        values.AsSpan(0, length).Fill(SplitKey.Missing);
+
+        foreach (var tag in tags)
+        {
+            int index = Array.IndexOf(_splitKeys, tag.Key);
+
+            // First occurrence of a key wins
+            if (index >= 0 && ReferenceEquals(values[index], SplitKey.Missing))
+            {
+                values[index] = tag.Value;
+            }
+        }
+
+        return values;
+    }
+
+    private SeriesEntry GetOrCreateSeries(string key)
     {
         lock (_gate)
         {
             if (_closed)
             {
                 // Late measurement racing with removal; record into a series nobody reads
-                return CreateSeries();
+                return new SeriesEntry(null, CreateSeries(), []);
             }
 
             if (_series.TryGetValue(key, out var existing))
             {
-                return existing.Series;
+                return existing;
             }
 
             if (_distinctSeries >= MaxSeries)
@@ -171,7 +233,7 @@ internal sealed class InstrumentAggregator
 
                 if (_series.TryGetValue(key, out existing))
                 {
-                    return existing.Series;
+                    return existing;
                 }
             }
             else
@@ -181,14 +243,15 @@ internal sealed class InstrumentAggregator
 
             var series = CreateSeries();
             var ids = series.Stats.Select(stat => BaseId + key + stat.Suffix).ToArray();
-            _series[key] = new SeriesEntry(series, ids);
+            var entry = new SeriesEntry(key, series, ids);
+            _series[key] = entry;
 
             for (var i = 0; i < ids.Length; i++)
             {
                 RegisterMonitor(ids[i], series.Stats[i]);
             }
 
-            return series;
+            return entry;
         }
     }
 
@@ -217,26 +280,22 @@ internal sealed class InstrumentAggregator
         };
     }
 
-    private string BuildSeriesKey(ReadOnlySpan<KeyValuePair<string, object?>> tags)
+    private string BuildSeriesKey(object?[] values)
     {
         StringBuilder? builder = null;
 
-        foreach (string splitKey in _splitKeys)
+        for (var i = 0; i < _splitKeys.Length; i++)
         {
-            foreach (var tag in tags)
+            if (ReferenceEquals(values[i], SplitKey.Missing))
             {
-                if (tag.Key != splitKey)
-                {
-                    continue;
-                }
-
-                builder = builder is null ? new StringBuilder("{") : builder.Append(',');
-                builder
-                    .Append(Sanitize(splitKey))
-                    .Append('=')
-                    .Append(Sanitize(Convert.ToString(tag.Value, CultureInfo.InvariantCulture) ?? ""));
-                break;
+                continue;
             }
+
+            builder = builder is null ? new StringBuilder("{") : builder.Append(',');
+            builder
+                .Append(Sanitize(_splitKeys[i]))
+                .Append('=')
+                .Append(Sanitize(Convert.ToString(values[i], CultureInfo.InvariantCulture) ?? ""));
         }
 
         // No split key present: the measurement belongs to the untagged series
@@ -249,5 +308,6 @@ internal sealed class InstrumentAggregator
         return value.Replace('/', '_');
     }
 
-    private sealed record SeriesEntry(MetricSeries Series, string[] Ids);
+    /// <param name="Key">Series key, or null for a detached series created after <see cref="Close"/></param>
+    private sealed record SeriesEntry(string? Key, MetricSeries Series, string[] Ids);
 }

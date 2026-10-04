@@ -250,6 +250,29 @@ public class MetricsCollectorTests
     }
 
     [Fact]
+    public void SplitHistogram_RecordedThroughMeterListener_DoesNotAllocate()
+    {
+        // Arrange
+        using var context = new MetricsTestContext(o => o.SplitBy("system.duration", "system"));
+        var histogram = context.Meter.CreateHistogram<double>("system.duration", "ms");
+        var movement = new KeyValuePair<string, object?>("system", "Movement");
+        histogram.Record(1, movement);
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+
+        for (var i = 0; i < 1000; i++)
+        {
+            histogram.Record(i, movement);
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
     public void Snapshot_WithinMinCollectInterval_ReusesPreviousCycle()
     {
         // Arrange

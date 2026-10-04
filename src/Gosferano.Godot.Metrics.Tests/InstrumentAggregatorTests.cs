@@ -192,6 +192,121 @@ public class InstrumentAggregatorTests : IDisposable
     }
 
     [Fact]
+    public void Record_WithKnownSplitValues_DoesNotAllocate()
+    {
+        // Arrange
+        var aggregator = Create(
+            _meter.CreateHistogram<double>("system.duration"),
+            InstrumentKind.Histogram,
+            ["system", "phase"]
+        );
+        KeyValuePair<string, object?>[] movement = [Tag("system", "Movement"), Tag("phase", 1)];
+        KeyValuePair<string, object?>[] combat = [Tag("phase", 1), Tag("system", "Combat")];
+        aggregator.Record(1, movement);
+        aggregator.Record(1, combat);
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+
+        for (var i = 0; i < 1000; i++)
+        {
+            aggregator.Record(i, movement);
+            aggregator.Record(i, combat);
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    public void Record_WhenMerged_DoesNotAllocate()
+    {
+        // Arrange
+        var aggregator = Create(_meter.CreateCounter<long>("ticks"), InstrumentKind.Counter);
+        KeyValuePair<string, object?>[] tags = [Tag("system", "Movement")];
+        aggregator.Record(1, tags);
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+
+        for (var i = 0; i < 1000; i++)
+        {
+            aggregator.Record(1, tags);
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    public void Record_WithEqualValuesOfDifferentTypes_SharesOneSeries()
+    {
+        // Arrange
+        var aggregator = Create(_meter.CreateUpDownCounter<int>("per.zone"), InstrumentKind.UpDownCounter, ["zone"]);
+
+        // Act
+        aggregator.Record(1, [Tag("zone", 7)]);
+        aggregator.Record(1, [Tag("zone", 7L)]);
+        aggregator.Record(1, [Tag("zone", "7")]);
+        var values = Collect(aggregator);
+
+        // Assert
+        Assert.Single(_adapter.Monitors);
+        Assert.Empty(_adapter.DuplicateAdds);
+        Assert.Equal(3, values[$"{aggregator.BaseId}{{zone=7}}"]);
+    }
+
+    [Fact]
+    public void Record_WithNullTagValue_IsDistinctFromMissingTag()
+    {
+        // Arrange
+        var aggregator = Create(_meter.CreateUpDownCounter<int>("queue"), InstrumentKind.UpDownCounter, ["zone"]);
+
+        // Act
+        aggregator.Record(2, [Tag("zone", null)]);
+        aggregator.Record(3, []);
+        var values = Collect(aggregator);
+
+        // Assert
+        Assert.Equal(2, values[$"{aggregator.BaseId}{{zone=}}"]);
+        Assert.Equal(3, values[aggregator.BaseId]);
+    }
+
+    [Fact]
+    public void Record_WithRepeatedSplitKey_UsesFirstOccurrence()
+    {
+        // Arrange
+        var aggregator = Create(_meter.CreateUpDownCounter<int>("queue"), InstrumentKind.UpDownCounter, ["zone"]);
+
+        // Act
+        aggregator.Record(1, [Tag("zone", "A"), Tag("zone", "B")]);
+
+        // Assert
+        Assert.Equal([$"{aggregator.BaseId}{{zone=A}}"], _adapter.Monitors.Keys);
+    }
+
+    [Fact]
+    public void Record_PastSeriesCap_DoesNotGrowLookupCache()
+    {
+        // Arrange
+        var aggregator = Create(_meter.CreateUpDownCounter<int>("per.entity"), InstrumentKind.UpDownCounter, ["id"]);
+
+        // Act
+        for (var i = 0; i < InstrumentAggregator.MaxSeries * 10; i++)
+        {
+            aggregator.Record(1, [Tag("id", i)]);
+        }
+
+        // Assert
+        Assert.Equal(InstrumentAggregator.MaxSeries, aggregator.CachedSplitKeyCount);
+        Assert.Equal(InstrumentAggregator.MaxSeries + 1, _adapter.Monitors.Count);
+    }
+
+    [Fact]
     public void Close_ReturnsAllIdsAndStopsRegisteringSeries()
     {
         // Arrange
